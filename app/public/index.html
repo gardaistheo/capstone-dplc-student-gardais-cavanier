@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FIFA World Cup 2026</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <h1>⚽ FIFA World Cup 2026</h1>
+      <p class="subtitle">United States · Mexico · Canada</p>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-section="groups">Groups</button>
+      <button class="nav-btn" data-section="standings">Standings</button>
+      <button class="nav-btn" data-section="matches">Matches</button>
+      <button class="nav-btn" data-section="vote">Vote</button>
+      <button class="nav-btn" data-section="results">Results</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Groups Section -->
+    <section id="groups" class="section active">
+      <h2>Group Stage</h2>
+      <div id="groups-container" class="groups-grid"></div>
+    </section>
+
+    <!-- Standings Section -->
+    <section id="standings" class="section">
+      <h2>Standings</h2>
+      <div id="standings-container" class="groups-grid"></div>
+    </section>
+
+    <!-- Matches Section -->
+    <section id="matches" class="section">
+      <h2>Match Results</h2>
+      <div id="matches-container" class="matches-list"></div>
+    </section>
+
+    <!-- Vote Section -->
+    <section id="vote" class="section">
+      <h2>Who Will Win the World Cup?</h2>
+      <p class="vote-description">Pick the team you think will lift the trophy!</p>
+      <div id="vote-container" class="vote-grid"></div>
+      <div id="vote-feedback" class="feedback hidden"></div>
+    </section>
+
+    <!-- Results Section -->
+    <section id="results" class="section">
+      <h2>Vote Results</h2>
+      <div id="results-container" class="results-list"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>FIFA World Cup 2026™ Fan Vote · Built with Express &amp; PostgreSQL</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
