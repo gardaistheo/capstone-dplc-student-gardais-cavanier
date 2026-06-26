@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Installer les dépendances avec npm ci pour la reproductibilité
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Stage 2: Runtime
 FROM node:20-alpine
