@@ -1,0 +1,51 @@
+# Dépendances
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Gestion de version
+.git
+.gitignore
+.gitattributes
+
+# Éditeurs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environnement
+.env
+.env.local
+.env.*.local
+
+# Build et logs
+dist
+build
+.next
+out
+coverage
+.nyc_output
+
+# Tests
+test
+tests
+*.test.js
+*.spec.js
+
+# Documentation
+README.md
+LICENSE
+
+# Configuration
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+Dockerfile
+
+# Fichiers temporaires
+*.tmp
+*.log
+*.pid
