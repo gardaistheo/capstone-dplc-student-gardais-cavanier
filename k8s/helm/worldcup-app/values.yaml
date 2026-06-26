@@ -1,0 +1,46 @@
+app:
+  image:
+    repository: ""  # e.g. docker.io/username/worldcup-app  OR  ghcr.io/username/worldcup-app
+    tag: "latest"
+    pullPolicy: Always
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  service:
+    port: 3000
+    type: ClusterIP
+
+postgresql:
+  image: "postgres:15"
+  database: "worldcup2026"
+  user: "worldcup"
+  existingSecret: "db-credentials"  # Pre-create with: kubectl create secret generic db-credentials --from-literal=password=... -n <namespace>
+  secretPasswordKey: "password"
+  storage:
+    storageClass: "local-path"  # k3s default storage class
+    size: "1Gi"
+
+ingress:
+  enabled: true
+  className: "traefik"
+  host: ""  # Leave empty for IP-based access, or set domain (e.g. worldcup.example.com)
+  tls:
+    enabled: false  # Set to true + configure cert-manager for HTTPS
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+monitoring:
+  enabled: true
+  prometheusRelease: "prometheus"  # Must match: helm install <name> kube-prometheus-stack
+
+imagePullSecrets: []
+# - name: registry-credentials

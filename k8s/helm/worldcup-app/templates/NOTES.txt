@@ -1,0 +1,27 @@
+✓ WorldCup 2026 App deployée !
+
+Récupérer l'IP du VPS :
+  VPS_IP=$(hostname -I | awk '{print $1}')
+
+{{- if .Values.ingress.host }}
+Application : http://{{ .Values.ingress.host }}
+{{- else }}
+Application : http://$VPS_IP
+{{- end }}
+
+Health check :
+  curl http://$VPS_IP/api/health
+  curl http://$VPS_IP/api/health/db
+
+Monitoring :
+  kubectl port-forward -n monitoring svc/prometheus-grafana 3001:80 --address 0.0.0.0
+  Grafana → http://$VPS_IP:3001  (admin / admin123)
+
+Pods :
+  kubectl get pods -n {{ .Release.Namespace }}
+
+Logs :
+  kubectl logs -f -l app.kubernetes.io/name=worldcup-app -n {{ .Release.Namespace }}
+
+HPA (auto-scaling) :
+  kubectl get hpa -n {{ .Release.Namespace }}
