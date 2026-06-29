@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: worldcup-app
+  IMAGE_REPOSITORY: docker.io/theoga/worldcup-app
   K8S_NAMESPACE: worldcup
   HELM_RELEASE: worldcup
 
@@ -39,96 +39,93 @@ jobs:
       - name: Run tests
         run: npm test
 
-  build-and-push:
-    name: Build and push Docker image
+  deploy:
+    name: Build on VPS and deploy to k3s
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name != 'pull_request'
-    outputs:
-      image_repository: ${{ steps.image.outputs.repository }}
-      image_tag: ${{ steps.image.outputs.tag }}
+    environment: prod
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve image metadata
-        id: image
+      - name: Install SSH password client
         run: |
-          echo "repository=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
-          echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y sshpass
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: ./app
-          push: true
-          tags: |
-            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
-            ${{ steps.image.outputs.repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    name: Deploy to k3s VPS
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.event_name != 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Package Helm chart
-        run: tar -czf /tmp/worldcup-app-chart.tgz -C k8s/helm worldcup-app
+      - name: Package deployment sources
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='app/node_modules' \
+            -czf /tmp/worldcup-deploy.tgz \
+            app \
+            k8s/helm/worldcup-app
 
       - name: Configure SSH
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_PORT: "22"
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
 
-      - name: Upload Helm chart
+      - name: Upload sources to VPS
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_PORT: "22"
           SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         run: |
-          scp -i ~/.ssh/deploy_key -P "$SSH_PORT" \
-            /tmp/worldcup-app-chart.tgz \
-            "$SSH_USER@$SSH_HOST:/tmp/worldcup-app-chart.tgz"
+          sshpass -p "$SSH_PASSWORD" scp -P "$SSH_PORT" \
+            /tmp/worldcup-deploy.tgz \
+            "$SSH_USER@$SSH_HOST:/tmp/worldcup-deploy.tgz"
 
-      - name: Helm upgrade
+      - name: Build, push and deploy on VPS
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_PORT: "22"
           SSH_USER: ${{ secrets.SSH_USER }}
-          IMAGE_REPOSITORY: ${{ needs.build-and-push.outputs.image_repository }}
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+          IMAGE_TAG="${GITHUB_SHA::12}"
+
+          sshpass -p "$SSH_PASSWORD" ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
             IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
             IMAGE_TAG="$IMAGE_TAG" \
             K8S_NAMESPACE="$K8S_NAMESPACE" \
             HELM_RELEASE="$HELM_RELEASE" \
+            SUDO_PASSWORD="$SSH_PASSWORD" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
-          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-          helm upgrade "$HELM_RELEASE" /tmp/worldcup-app-chart.tgz \
+          sudo_docker() {
+            printf '%s\n' "$SUDO_PASSWORD" | sudo -S -p '' env DOCKER_CONFIG="$HOME/.docker" docker "$@"
+          }
+
+          WORKDIR="/tmp/worldcup-deploy-${IMAGE_TAG}"
+          rm -rf "$WORKDIR"
+          mkdir -p "$WORKDIR"
+          tar -xzf /tmp/worldcup-deploy.tgz -C "$WORKDIR"
+          cd "$WORKDIR"
+
+          sudo_docker build \
+            -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+            -t "${IMAGE_REPOSITORY}:latest" \
+            ./app
+
+          sudo_docker push "${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          sudo_docker push "${IMAGE_REPOSITORY}:latest"
+
+          if [ -f "$HOME/.kube/config" ]; then
+            export KUBECONFIG="$HOME/.kube/config"
+          else
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          fi
+
+          helm upgrade "$HELM_RELEASE" ./k8s/helm/worldcup-app \
             --namespace "$K8S_NAMESPACE" \
             --install \
             --create-namespace \

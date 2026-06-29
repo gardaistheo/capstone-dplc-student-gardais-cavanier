@@ -7,8 +7,8 @@ La pipeline GitHub Actions automatise le deploiement de l'application sur le VPS
 Elle fait trois choses :
 
 1. lancer les tests Node.js ;
-2. builder et pousser l'image Docker sur Docker Hub ;
-3. deployer le chart Helm sur le cluster k3s via SSH.
+2. envoyer les sources sur le VPS ;
+3. builder/push l'image Docker depuis l'utilisateur `claude`, puis deployer le chart Helm sur k3s.
 
 ## Declenchement
 
@@ -20,48 +20,48 @@ Le workflow `.github/workflows/ci-cd.yml` se lance :
 
 ## Secrets GitHub requis
 
-Dans GitHub : `Settings` -> `Secrets and variables` -> `Actions`.
+Les secrets utilises sont des **environment secrets** dans l'environnement GitHub `prod`.
 
-Secrets a creer :
+Dans GitHub : `Settings` -> `Environments` -> `prod` -> `Environment secrets`.
+
+Secrets requis :
 
 ```text
-DOCKERHUB_USERNAME=theoga
-DOCKERHUB_TOKEN=<token Docker Hub>
 SSH_HOST=178.170.25.235
-SSH_PORT=22
-SSH_USER=root
-SSH_PRIVATE_KEY=<cle privee SSH autorisee sur le VPS>
+SSH_USER=claude
+SSH_PASSWORD=<mot de passe SSH>
 ```
 
-Ne mets pas le mot de passe root du VPS dans GitHub Actions. C'est faisable avec des actions tierces, mais c'est une mauvaise idee. Une cle SSH dediee est plus propre et plus facile a supprimer apres la soutenance.
+La connexion par cle privee etant desactivee, la pipeline utilise `sshpass` avec `SSH_PASSWORD`.
 
-## Creation d'une cle de deploiement
+## Pre-requis sur la VM
 
-Sur ta machine :
+Sur la VM, l'utilisateur `claude` doit deja avoir :
 
-```bash
-ssh-keygen -t ed25519 -C "github-actions-worldcup" -f ./github-actions-worldcup
-```
+- acces a `sudo docker` ;
+- une session Docker Hub deja connectee (`docker login`) ;
+- acces a `kubectl` et `helm` ;
+- un kubeconfig lisible, idealement `~/.kube/config`.
 
-Ajouter la cle publique sur le VPS :
-
-```bash
-ssh-copy-id -i ./github-actions-worldcup.pub root@178.170.25.235
-```
-
-Mettre le contenu de la cle privee dans le secret GitHub :
+Verification rapide sur la VM :
 
 ```bash
-cat ./github-actions-worldcup
+ssh claude@178.170.25.235
+sudo DOCKER_CONFIG=/home/claude/.docker docker info
+sudo DOCKER_CONFIG=/home/claude/.docker docker push docker.io/theoga/worldcup-app:test-ci
+kubectl get nodes
+helm version
 ```
 
 ## Ce que fait le deploiement
 
 Le job `deploy` :
 
-- package le chart Helm local ;
-- l'envoie sur le VPS dans `/tmp/worldcup-app-chart.tgz` ;
-- execute `helm upgrade --install worldcup /tmp/worldcup-app-chart.tgz` ;
+- package `app/` et `k8s/helm/worldcup-app/` ;
+- envoie l'archive sur le VPS avec SSH par mot de passe ;
+- build l'image sur le VPS avec `sudo docker` ;
+- push `docker.io/theoga/worldcup-app:<sha>` et `docker.io/theoga/worldcup-app:latest` avec le Docker config de `claude` ;
+- execute `helm upgrade --install worldcup ./k8s/helm/worldcup-app` ;
 - force l'image a utiliser le tag du commit GitHub ;
 - attend le rollout Kubernetes ;
 - verifie `/api/health` et `/api/health/db`.
@@ -87,3 +87,5 @@ curl -sf http://178.170.25.235/api/health/db
 ## Limite importante
 
 Cette pipeline deploie sur un cluster k3s single-node. Donc oui, c'est une CI/CD fonctionnelle. Non, ce n'est pas une architecture zero-downtime multi-zone de production. Si on te challenge la-dessus, il faut le dire clairement.
+
+Autre limite : le mot de passe SSH dans GitHub Actions marche pour une demo, mais ce n'est pas le top niveau securite. Pour un vrai projet, il faudrait retablir une cle SSH de deploiement limitee ou passer par un runner self-hosted sur la VM.
