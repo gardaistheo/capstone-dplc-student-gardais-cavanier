@@ -1,0 +1,145 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+      - mission/deployer-sur-le-cloud
+  push:
+    branches:
+      - mission/deployer-sur-le-cloud
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: worldcup-app
+  K8S_NAMESPACE: worldcup
+  HELM_RELEASE: worldcup
+
+jobs:
+  test:
+    name: Test Node.js app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  build-and-push:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    outputs:
+      image_repository: ${{ steps.image.outputs.repository }}
+      image_tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: image
+        run: |
+          echo "repository=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: |
+            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to k3s VPS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package Helm chart
+        run: tar -czf /tmp/worldcup-app-chart.tgz -C k8s/helm worldcup-app
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload Helm chart
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          scp -i ~/.ssh/deploy_key -P "$SSH_PORT" \
+            /tmp/worldcup-app-chart.tgz \
+            "$SSH_USER@$SSH_HOST:/tmp/worldcup-app-chart.tgz"
+
+      - name: Helm upgrade
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          IMAGE_REPOSITORY: ${{ needs.build-and-push.outputs.image_repository }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
+            IMAGE_TAG="$IMAGE_TAG" \
+            K8S_NAMESPACE="$K8S_NAMESPACE" \
+            HELM_RELEASE="$HELM_RELEASE" \
+            'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+          helm upgrade "$HELM_RELEASE" /tmp/worldcup-app-chart.tgz \
+            --namespace "$K8S_NAMESPACE" \
+            --install \
+            --create-namespace \
+            --set app.image.repository="$IMAGE_REPOSITORY" \
+            --set app.image.tag="$IMAGE_TAG" \
+            --set app.image.pullPolicy=IfNotPresent \
+            --wait \
+            --timeout 5m
+
+          kubectl rollout status deployment/worldcup-app -n "$K8S_NAMESPACE" --timeout=120s
+          kubectl get pods -n "$K8S_NAMESPACE"
+          curl -fsS --max-time 10 http://127.0.0.1/api/health
+          curl -fsS --max-time 10 http://127.0.0.1/api/health/db
+          REMOTE
