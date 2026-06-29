@@ -42,5 +42,20 @@ monitoring:
   enabled: true
   prometheusRelease: "prometheus"  # Must match: helm install <name> kube-prometheus-stack
 
+standingsJob:
+  enabled: true
+  image: "postgres:15"
+  schedule: "*/15 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: "25m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+
 imagePullSecrets: []
 # - name: registry-credentials
