@@ -1,0 +1,13 @@
+{{- if .Values.standingsJob.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "worldcup-app.fullname" . }}-standings-job
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "worldcup-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: standings-job
+data:
+  refresh-standings.sql: |
+{{ .Files.Get "files/refresh-standings.sql" | indent 4 }}
+{{- end }}

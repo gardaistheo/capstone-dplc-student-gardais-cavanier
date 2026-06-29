@@ -1,0 +1,76 @@
+{{- if .Values.standingsJob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "worldcup-app.fullname" . }}-standings
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "worldcup-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: standings-job
+spec:
+  schedule: {{ .Values.standingsJob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.standingsJob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.standingsJob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.standingsJob.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "worldcup-app.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: standings-job
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+          containers:
+            - name: refresh-standings
+              image: {{ .Values.standingsJob.image | quote }}
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: {{ include "worldcup-app.fullname" . }}-config
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.existingSecret }}
+                      key: {{ .Values.postgresql.secretPasswordKey }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.existingSecret }}
+                      key: {{ .Values.postgresql.secretPasswordKey }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  psql -v ON_ERROR_STOP=1 \
+                    -h "$DB_HOST" \
+                    -p "$DB_PORT" \
+                    -U "$DB_USER" \
+                    -d "$DB_NAME" \
+                    -f /job/refresh-standings.sql
+
+                  echo "Latest generated standings snapshot:"
+                  psql -v ON_ERROR_STOP=1 \
+                    -h "$DB_HOST" \
+                    -p "$DB_PORT" \
+                    -U "$DB_USER" \
+                    -d "$DB_NAME" \
+                    -c "SELECT group_letter, rank, team_name, points, goal_difference FROM group_standings_snapshots WHERE generated_at = (SELECT MAX(generated_at) FROM group_standings_snapshots) ORDER BY group_letter, rank LIMIT 24;"
+              resources:
+                {{- toYaml .Values.standingsJob.resources | nindent 16 }}
+              volumeMounts:
+                - name: standings-sql
+                  mountPath: /job
+                  readOnly: true
+          volumes:
+            - name: standings-sql
+              configMap:
+                name: {{ include "worldcup-app.fullname" . }}-standings-job
+{{- end }}
