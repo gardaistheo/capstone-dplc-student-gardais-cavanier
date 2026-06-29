@@ -1,0 +1,71 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "worldcup-app.fullname" . }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "worldcup-app.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.prometheusRelease }}
+spec:
+  groups:
+    - name: worldcup-app.availability
+      rules:
+        - alert: WorldcupAppDown
+          expr: up{job="{{ include "worldcup-app.fullname" . }}"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "WorldCup app is down"
+            description: "No worldcup-app pods have been reachable for 1 minute."
+
+    - name: worldcup-app.performance
+      rules:
+        - alert: WorldcupHighCPU
+          expr: |
+            rate(process_cpu_seconds_total{job="{{ include "worldcup-app.fullname" . }}"}[5m]) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WorldCup app CPU > 80%"
+            description: "CPU usage has been above 80% for 5 minutes."
+
+        - alert: WorldcupHighMemory
+          expr: |
+            process_resident_memory_bytes{job="{{ include "worldcup-app.fullname" . }}"} > 200 * 1024 * 1024
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WorldCup app memory > 200MB"
+            description: "Memory usage has been above 200MB for 5 minutes."
+
+        - alert: WorldcupHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              rate(http_request_duration_seconds_bucket{job="{{ include "worldcup-app.fullname" . }}"}[5m])
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High request latency (p95 > 2s)"
+            description: "95th percentile latency is above 2 seconds for 5 minutes."
+
+    - name: worldcup-app.resilience
+      rules:
+        - alert: WorldcupPodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="{{ .Release.Namespace }}",
+              container="{{ .Chart.Name }}"
+            }[15m]) * 900 > 3
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod crash looping in {{ .Release.Namespace }}"
+            description: "Pod {{ "{{ $labels.pod }}" }} has restarted more than 3 times in 15 minutes."
+{{- end }}

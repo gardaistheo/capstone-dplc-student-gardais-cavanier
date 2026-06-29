@@ -1,0 +1,6 @@
+apiVersion: v2
+name: worldcup-app
+description: World Cup 2026 Fan Voting Application - Kubernetes deployment
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
