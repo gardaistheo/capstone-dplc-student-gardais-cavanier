@@ -30,7 +30,9 @@ flowchart TB
     HPA --> PodB
     PodA --> Postgres["PostgreSQL StatefulSet<br/>PVC local-path 1Gi"]
     PodB --> Postgres
-    Prom["Prometheus / Grafana / Alertmanager"] --> Service
+    Prom["ServiceMonitor<br/>scrape /metrics"] --> Service
+    Rules["PrometheusRule<br/>5 alertes app"] --> Prometheus["Prometheus externe<br/>kube-prometheus-stack"]
+    Prometheus --> Alertmanager["Alertmanager externe<br/>kube-prometheus-stack"]
     Cron["CronJob standings"] --> Postgres
 ```
 
@@ -91,7 +93,7 @@ Points couverts :
 - HPA configure de 2 a 10 replicas ;
 - PostgreSQL en StatefulSet avec volume persistant ;
 - probes de readiness/liveness ;
-- monitoring Prometheus/Grafana/Alertmanager.
+- integration Prometheus via `ServiceMonitor` et `PrometheusRule`.
 
 Limite honnete : le VPS est single-node. Donc on demontre de la resilience applicative et du self-healing Kubernetes, pas une vraie haute disponibilite multi-node ou multi-AZ. Si quelqu'un dit que c'est "HA cloud production", c'est faux.
 
@@ -171,15 +173,40 @@ Ce qu'il faut montrer : Kubernetes recree un pod et le service continue de route
 
 ## Observabilite
 
-Stack livree :
+Ce qui est livre dans le Helm chart :
 
-- Prometheus ;
-- Grafana ;
-- Alertmanager ;
 - ServiceMonitor pour `/metrics` ;
-- PrometheusRule pour alertes applicatives.
+- PrometheusRule avec 5 alertes applicatives ;
+- activation via `values.yaml` :
 
-Acces Grafana :
+```yaml
+monitoring:
+  enabled: true
+  prometheusRelease: "prometheus"
+```
+
+Alertes definies dans `k8s/helm/worldcup-app/templates/app-prometheusrule.yaml` :
+
+- `WorldcupAppDown` : critique ;
+- `WorldcupHighCPU` : warning ;
+- `WorldcupHighMemory` : warning ;
+- `WorldcupHighLatency` : warning ;
+- `WorldcupPodCrashLooping` : critique.
+
+Ce qui vient de l'exterieur du chart :
+
+- Prometheus est fourni par `kube-prometheus-stack` ;
+- Alertmanager est fourni par `kube-prometheus-stack` ;
+- Alertmanager recoit les alertes Prometheus automatiquement si la stack est installee correctement ;
+- Grafana peut etre installe par `kube-prometheus-stack`, mais aucun dashboard Grafana specifique a l'application n'est fourni dans ce chart.
+
+Ce qui manque encore pour une observabilite vraiment propre :
+
+- dashboard Grafana versionne dans le repo ;
+- route Alertmanager explicite pour email, Slack ou autre canal ;
+- politique de notification documentee.
+
+Acces Grafana si `kube-prometheus-stack` a ete installe avec Grafana :
 
 ```bash
 kubectl port-forward -n monitoring svc/prometheus-grafana 3001:80 --address 0.0.0.0
@@ -191,7 +218,7 @@ URL :
 http://178.170.25.235:3001
 ```
 
-Identifiants du runbook :
+Identifiants indiques dans le runbook de deploiement :
 
 ```text
 admin / admin123
@@ -247,6 +274,6 @@ Trade-off :
 4. Lancer `scripts/live-load-test.sh`.
 5. Lancer `scripts/hpa-scale-test.sh`.
 6. Faire un crash test avec `/api/admin/kill`.
-7. Montrer Grafana/Prometheus.
+7. Montrer Prometheus, les alertes, et Grafana seulement si la stack externe l'a installe.
 8. Declencher le CronJob mission 3.
 9. Montrer la pipeline GitHub Actions.
