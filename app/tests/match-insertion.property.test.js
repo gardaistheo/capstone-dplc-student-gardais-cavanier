@@ -53,6 +53,7 @@ describe('Feature: capstone-cloud-resilience, Property 1: Round-trip d\'insertio
         async (matchData) => {
           const dateStr = matchData.date.toISOString().split('T')[0];
           let capturedInsertParams = null;
+          let teamLookupCount = 0;
 
           // Mock pool.query to simulate DB behavior:
           // 1st call: SELECT id FROM teams WHERE name = $1 (team_home) -> returns {id: 1}
@@ -60,11 +61,12 @@ describe('Feature: capstone-cloud-resilience, Property 1: Round-trip d\'insertio
           // 3rd call: INSERT INTO matches ... RETURNING id -> returns {id: 42}
           pool.query.mockImplementation((sql, params) => {
             if (sql.includes('SELECT id FROM teams WHERE name')) {
-              // Return a valid team id for any team name lookup
-              if (params[0] === matchData.team_home.trim()) {
+              // Increment counter for each team lookup
+              teamLookupCount++;
+              if (teamLookupCount === 1) {
                 return Promise.resolve({ rows: [{ id: 1 }] });
               }
-              if (params[0] === matchData.team_away.trim()) {
+              if (teamLookupCount === 2) {
                 return Promise.resolve({ rows: [{ id: 2 }] });
               }
               return Promise.resolve({ rows: [] });
