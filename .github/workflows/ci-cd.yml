@@ -4,10 +4,9 @@ on:
   pull_request:
     branches:
       - main
-      - mission/deployer-sur-le-cloud
   push:
     branches:
-      - mission/deployer-sur-le-cloud
+      - main
   workflow_dispatch:
 
 env:
